@@ -12,7 +12,7 @@ n_brain_voxel = np.sum(mask) # 292019 within-brain voxels
 dim_mask = np.shape(mask) # [91,109,91]
 
 # load foci data
-foci = pd.read_csv('BrainMap.csv') # shape: (23424,5)
+foci = pd.read_csv('BrainMap_foci.csv', index_col=False) # shape: (15213, 5)
 
 # transform the foci from MNI152 coordinates to voxel space
 origin = (90,-126,-72)
@@ -24,16 +24,17 @@ foci = foci.astype("int64")
 
 # remove the foci if its coordinates are beyond (91,109,91)
 drop_condition = foci[(foci["x"]<0)|(foci["x"]>90)|(foci["y"]<0)|(foci["y"]>108)|(foci["z"]<0)|(foci["z"]>90)].index
-foci = foci.drop(drop_condition) # shape: (23415, 5)
-
+foci = foci.drop(drop_condition) # shape: (15210, 5)
+foci = foci.reset_index(drop=True)
 # remove the foci if it falls outside the brain mask
-n_foci = foci.shape[0] # 23415
+n_foci = foci.shape[0] # 15210
+
 foci_outside = list()
 for i in range(n_foci):
     foci_coord = foci.iloc[i,2:5]
     if mask[foci_coord[0], foci_coord[1], foci_coord[2]] == 0:
         foci_outside.append(i)
-foci = foci.drop(foci_outside) # shape: (23269, 5)
+foci = foci.drop(labels=foci_outside, axis=0) # shape: (15116, 5)
 
 # remove the blank space around the brain mask
 xx, yy, zz = np.arange(dim_mask[0]), np.arange(dim_mask[1]), np.arange(dim_mask[2])
@@ -53,7 +54,7 @@ zz = np.setdiff1d(zz, z_remove) #[3,78] 76
 
 # remove the foci if its coordinates are beyond (7~82, 8~101, 3~78)
 drop_condition2 = foci[(foci["x"]<7)|(foci["x"]>82)|(foci["y"]<8)|(foci["y"]>101)|(foci["z"]<3)|(foci["z"]>78)].index
-foci = foci.drop(drop_condition2) #shape: (23250, 5)
+foci = foci.drop(drop_condition2) #shape: (15116, 5)
 
 # create B-spline basis for x/y/z coordinate
 x_deg = 3
