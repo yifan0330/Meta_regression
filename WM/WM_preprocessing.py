@@ -37,6 +37,7 @@ foci["z"] = (foci["z"] - origin[2])/2
 foci = foci.round(0) # round to the nearest integer
 foci = foci.astype("int64")
 
+
 # remove the foci if its coordinates are beyond (91,109,91)
 drop_condition = foci[(foci["x"]<0)|(foci["x"]>90)|(foci["y"]<0)|(foci["y"]>108)|(foci["z"]<0)|(foci["z"]>90)].index
 foci = foci.drop(drop_condition) # shape: (2239, 5)
@@ -82,6 +83,21 @@ foci_non_verbal = foci.loc[foci['verbal'] == 0] # shape: (937, 5)
 foci = foci.reset_index(drop=True)
 foci_verbal = foci_verbal.reset_index(drop=True)
 foci_non_verbal = foci_non_verbal.reset_index(drop=True)
+
+# count the total number of foci in study i regardless of foci location in verbal/non-verbal group
+contrast_verbal = foci_verbal['contrast'].tolist()
+Y_t_verbal = list()
+for i in np.unique(contrast_verbal):
+    Y_t_verbal.append(contrast_verbal.count(i))
+Y_t_verbal = np.array(Y_t_verbal) # shape: (102,); sum: 1286
+
+contrast_nonverbal = foci_non_verbal['contrast'].tolist()
+Y_t_nonverbal = list()
+for i in np.unique(contrast_nonverbal):
+    Y_t_nonverbal.append(contrast_nonverbal.count(i))
+Y_t_nonverbal = np.array(Y_t_nonverbal) # shape: (55,); sum: 937
+np.savetxt('Y_t_verbal.txt', Y_t_verbal, fmt='%i')
+np.savetxt('Y_t_nonverbal.txt', Y_t_nonverbal, fmt='%i')
 
 # create B-spline basis for x/y/z coordinate
 x_deg = 3
@@ -135,30 +151,39 @@ foci_verbal['index'] = (foci_verbal['x'] - x_min) + image_dim[0]*(foci_verbal['y
 foci_non_verbal['index'] = (foci_non_verbal['x'] - x_min) + image_dim[0]*(foci_non_verbal['y'] - y_min) + image_dim[0]*image_dim[1]*(foci_non_verbal['z']-z_min) # shape: (937, 6)
 
 # initialize the response vector as 0
-y = np.zeros((np.prod(image_dim),)) # shape: (542944/461472,)
-foci_index = foci['index'].to_numpy() # shape: (2223/2018, )
+y_all= np.zeros((dim_mask[0],dim_mask[1],dim_mask[2])) # shape: (91,109,91)
 for i in range(foci.shape[0]):
-    index = foci_index[i]
-    y[index] += 1
-y = y.astype(int)
+    row = foci.iloc[i].tolist()
+    x,y,z = row[1:4]
+    y_all[x,y,z] += 1
+y_all = y_all.astype(int)
+y_all = y_all[mask == 1] # shape: (292019,)
+# sum of y_verbal: 2223; number of nonzero elements: 2125; max of y_verbal: 3
+save_npz("y.npz", csr_matrix(y))
 
-y_verbal = np.zeros((np.prod(image_dim),)) # shape: (542944/461472,)
-verbal_foci_index = foci_verbal['index'].to_numpy() # shape: (1158, )
-for i in range(foci_verbal.shape[0]):
-    index = verbal_foci_index[i]
-    y_verbal[index] += 1
+y_verbal = np.zeros((dim_mask[0],dim_mask[1],dim_mask[2])) # shape: (91,109,91)
+for i in range(foci.shape[0]):
+    row = foci.iloc[i].tolist()
+    verbal = row[4]
+    x,y,z = row[1:4]
+    if verbal == 1:
+        y_verbal[x,y,z] += 1
 y_verbal = y_verbal.astype(int)
+y_verbal = y_verbal[mask == 1] # shape: (292019,)
 # sum of y_verbal: 1286; number of nonzero elements: 1244; max of y_verbal: 3
-# sum of y_verbal: 1158; number of nonzero elements: 1121; max of y_verbal: 3
+save_npz("y_verbal.npz", csr_matrix(y_verbal))
 
-y_non_verbal = np.zeros((np.prod(image_dim),)) # shape: (542944,)
-non_verbal_foci_index = foci_non_verbal['index'].to_numpy() # shape: (937/860, )
-for i in range(foci_non_verbal.shape[0]):
-    index = non_verbal_foci_index[i]
-    y_non_verbal[index] += 1
-y_non_verbal = y_non_verbal.astype(int)
+y_nonverbal = np.zeros((dim_mask[0],dim_mask[1],dim_mask[2])) # shape: (91,109,91)
+for i in range(foci.shape[0]):
+    row = foci.iloc[i].tolist()
+    verbal = row[4]
+    x,y,z = row[1:4]
+    if verbal == 0:
+        y_nonverbal[x,y,z] += 1
+y_nonverbal = y_nonverbal.astype(int)
+y_nonverbal = y_nonverbal[mask == 1] # shape: (292019,)
 # sum of y_non_verbal: 923; number of nonzero elements: 923; max of y_verbal: 2
-# sum of y_non_verbal: 860; number of nonzero elements: 846; max of y_verbal: 2
+save_npz("y_nonverbal.npz", csr_matrix(y_nonverbal))
 
 ## remove the voxels outside brain mask
 np.set_printoptions(suppress=True)
@@ -173,9 +198,6 @@ for i in range(image_dim[0]):
 outside_brain = outside_brain.astype(int)
 np.savetxt("outside_brain.txt", outside_brain, fmt="%i")
 X = np.delete(X, obj=outside_brain, axis=0) # shape: (292019, 640) / (194369, 640)
-y = np.delete(y, obj=outside_brain) # shape: (292019/194369,)  
-y_verbal = np.delete(y_verbal, obj=outside_brain) # shape: (292019/194369,)
-y_non_verbal = np.delete(y_non_verbal, obj=outside_brain) # shape: (292019/194369,)
 
 ## remove tensor product basis that have no support in the brain
 no_suppport_basis = np.array([])
@@ -184,6 +206,7 @@ for bx in range(x_df):
         for bz in range(z_df):
             basis_index = bz + z_df*by + z_df*y_df*bx
             basis_coef = X[:, basis_index]
+            print(np.max(basis_coef))
             if np.max(basis_coef) < 0.1:
                 no_suppport_basis = np.append(no_suppport_basis, basis_index)
 no_suppport_basis = no_suppport_basis.astype(int)
@@ -192,14 +215,5 @@ print(no_suppport_basis.shape)
 X = np.delete(X, obj=no_suppport_basis, axis=1) # shape: (292019, 443/365/311) / (194369, 562)
 print(X.shape)
 # convert to compressed sparse row matrix
-X = csr_matrix(X) 
-y = csr_matrix(y)
-y_verbal = csr_matrix(y_verbal)
-y_non_verbal = csr_matrix(y_non_verbal)
-
-save_npz("X.npz", X)
-save_npz("y.npz", y)
-save_npz("y_verbal.npz", y_verbal)
-save_npz("y_non_verbal.npz", y_non_verbal)
-
+save_npz("X.npz", csr_matrix(X))
 

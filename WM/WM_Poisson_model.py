@@ -7,27 +7,40 @@ from scipy.sparse import load_npz, csr_matrix, csc_matrix, hstack, vstack
 from scipy.sparse.linalg import inv, cg
 from scipy.linalg import eigvals
 from scipy.optimize import minimize, fsolve, root, brute
+from statsmodels.regression.linear_model import WLS
 import patsy
 import statsmodels.api as sm
-import nibabel as nib
+import nibabel as nib 
 from datetime import datetime
 
 # load foci and counts from npz files 
 X_sparse = load_npz("X.npz") 
-y = load_npz("y.npz").transpose()
+#y = load_npz("y.npz").transpose()
 y_verbal_sparse = load_npz("y_verbal.npz").transpose()
 y_nonverbal_sparse = load_npz("y_non_verbal.npz").transpose()
+initial_mu_verbal_sparse = load_npz("verbal_init.npz").transpose()
+initial_mu_nonverbal_sparse = load_npz("nonverbal_init.npz").transpose()
 
 X = X_sparse.toarray() # shape: (292019, 443/365/311/277)/ (194369, 562)
-y = y.toarray() # sum = 2223; max = 3; nonzero counts = 2125
+#y = y.toarray() # sum = 2223; max = 3; nonzero counts = 2125
 y_verbal = y_verbal_sparse.toarray() # sum = 1286; max = 3; nonzero counts = 1244
-                                    # sum = 1158; max = 3; nonzero counts = 1121
 y_nonverbal = y_nonverbal_sparse.toarray() # sum = 937; max = 2; nonzero counts = 923
+initial_mu_verbal = initial_mu_verbal_sparse.toarray() # sum = 1235.1502880129597; max = 0.04310029364418784; nonzero counts = 292019
+initial_mu_nonverbal = initial_mu_nonverbal_sparse.toarray() # sum = 907.3661721579631; max = 0.030369614809501583; nonzero counts = 292019
 
-print(np.sum(y), np.sum(y_verbal), np.sum(y_nonverbal))
+# normalization so sum within the mask is equal to total foci count
+ratio_verbal = np.sum(initial_mu_verbal)/np.sum(y_verbal)
+initial_mu_verbal = initial_mu_verbal / ratio_verbal
+# sum = 1286.0; max = 0.044874682995535195; nonzero counts = 292019
+ratio_nonverbal = np.sum(initial_mu_nonverbal)/np.sum(y_nonverbal)
+initial_mu_nonverbal = initial_mu_nonverbal / ratio_nonverbal
+# sum = 936.9999999999999; max = 0.031361461281751456; nonzero counts = 292019
 
+# use machine epilson instead of zero because log(mu)
+#machine_epsilon = np.finfo(float).eps 
+#initial_mu_verbal[initial_mu_verbal == 0] = machine_epsilon
+#initial_mu_nonverbal[initial_mu_nonverbal == 0] = machine_epsilon
 
-exit()
 # Firth regression for log-linear model
 now = datetime.now()
 print(now)
@@ -51,12 +64,25 @@ def loglikelihood_Poisson(y, mu):
     l_fr = l + 1/2 * log_det_XWX
     return l, l_fr
 
+# Use WLS to find initial value of beta in iteration 1
+#initial_mu_verbal_sqrt = np.sqrt(initial_mu_verbal)
+#X_star = X_sparse.multiply(initial_mu_verbal_sqrt)# X* = W^(1/2) X
+#XWX = X_star.T @ X_star # XWX = (W^(1/2) X)^T (W^(1/2) X)
+#XWX_inverse = inv(csc_matrix(XWX)) 
+#WX = X_sparse.multiply(initial_mu_verbal)
+#WX_transpose = WX.T
+#xi = np.log(initial_mu_verbal) #+ (y_verbal - initial_mu_verbal) / initial_mu_verbal 
+#beta = XWX_inverse @ WX_transpose @ xi
+xi = y_verbal - initial_mu_verbal#np.log(initial_mu_verbal)
+print(xi[0:10])
+exit()
+weights = initial_mu_verbal.reshape((292019,1))
+wls_model = sm.WLS(xi,X, weights = weights)
+wls_results = wls_model.fit()
+initial_beta_verbal = wls_results.params
 
-beta_i = -5.425282242829142 #np.log(np.sum(y)/X.shape[0]) # -5.425282242829142 / -5.123064035139061
-beta = np.full(shape=(X.shape[1],1), fill_value=beta_i) # shape: (365,1) / (562, 1)
-
-log_mu = np.matmul(X, beta)
-mu = np.exp(log_mu)
+beta = initial_beta_verbal.reshape((311,1))
+mu_verbal_1 = np.exp(X @ beta)
 
 diff = np.inf # initializations for the loop
 l_fr_prev = -np.inf
@@ -64,16 +90,13 @@ count = 0
 
 beta_2norm_list = [np.linalg.norm(beta)]
 
-l_0, l_fr_0 = loglikelihood_Poisson(y, mu)
-l_list = [l_0]
-l_fr_list = [l_fr_0]
+l_0, l_fr_0 = loglikelihood_Poisson(y_verbal, initial_mu_verbal)
+l_1, l_fr_1 = loglikelihood_Poisson(y_verbal, mu_verbal_1)
+l_list = [l_0, l_1]
+l_fr_list = [l_fr_0, l_fr_1]
+print(l_list, l_fr_list)
 
-print(np.sum(np.log(factorial(y))))
-print(np.sum(np.log(factorial(y_verbal))))
-print(np.sum(np.log(factorial(y_nonverbal))))
-
-exit()
-while diff > 1e-2:
+while diff > 1e-4:
     g_mu = np.matmul(X, beta)
     mu = np.exp(g_mu) # mu: mean vector (log link)
     mu_sqrt = np.sqrt(mu)
@@ -82,15 +105,14 @@ while diff > 1e-2:
     XWX = X_star.T @ X_star # XWX = (W^(1/2) X)^T (W^(1/2) X)
     XWX_inverse = inv(csc_matrix(XWX)) 
     # compute the update
-    WX = X_sparse.multiply(mu) # shape: (292019, 365)
+    WX = X_sparse.multiply(mu) 
     hadamard_product = (WX @ XWX_inverse).multiply(X) # diag(AB^T) = (A @ B) 1
     h = np.sum(hadamard_product, axis=1) # h = (H_11,H_22,...,H_nn)^T, H = WX(X^T WX)^(-1) X^T
-    first_order_derivarive = X.transpose() @ (y + 1/2*h -mu)
+    first_order_derivarive = X.transpose() @ (y_verbal + 1/2*h - mu)
     # start with gradient descent at the beginning
     if diff > 1:
-        step_size = 0.07
-        update = step_size * first_order_derivarive # shape: (365,1)
-        print('2 norm of update', np.linalg.norm(update))
+        step_size = 0.1
+        update = step_size * first_order_derivarive 
         beta = beta + update
     # switch back to Newton's method
     else: 
@@ -104,9 +126,10 @@ while diff > 1e-2:
     print('2 norm of beta is', beta_2norm)
     # compute (penalized) log-likelihood and save to list
     updated_log_mu = np.matmul(X, beta)
+    print(np.min(updated_log_mu), np.max(updated_log_mu))
     updated_mu = np.exp(updated_log_mu)
     print(updated_mu.shape)
-    l, l_fr = loglikelihood_Poisson(y, updated_mu)
+    l, l_fr = loglikelihood_Poisson(y_verbal, updated_mu)
     l_list.append(l)
     l_fr_list.append(l_fr)
     diff = l_fr - l_fr_prev
