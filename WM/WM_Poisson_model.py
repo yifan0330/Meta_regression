@@ -42,8 +42,6 @@ initial_mu_nonverbal = initial_mu_nonverbal / ratio_nonverbal
 #initial_mu_nonverbal[initial_mu_nonverbal == 0] = machine_epsilon
 
 # Firth regression for log-linear model
-now = datetime.now()
-print(now)
 def loglikelihood_Poisson(y, mu):
     #sum_logy_factorial = sum(log(factorial(y)))
     sum_logy_factorial = np.sum(np.log(factorial(y)))
@@ -58,7 +56,6 @@ def loglikelihood_Poisson(y, mu):
     X_star = csr_matrix(X).multiply(mu_sqrt)# X* = W^(1/2) X
     XWX = X_star.T @ X_star # XWX = (W^(1/2) X)^T (W^(1/2) X)
     XWX_eigens = np.real(eigvals(XWX.todense()))
-    #print(np.min(XWX_eigens), np.max(XWX_eigens))
     log_XWX_eigens = np.log(XWX_eigens)
     log_det_XWX = np.sum(log_XWX_eigens)
     l_fr = l + 1/2 * log_det_XWX

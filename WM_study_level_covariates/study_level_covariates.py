@@ -23,6 +23,7 @@ Y_i_nonverbal = np.loadtxt('preprocessed_data/Y_i_nonverbal.txt', dtype=int) # s
 Y_i_verbal = Y_i_verbal.reshape((102,1))
 Y_i_nonverbal = Y_i_nonverbal.reshape((55,1))
 
+
 def Fisher_Information(mu_X, mu_Z, X, Z):
     mu_g = np.sum(mu_Z) * mu_X # shape: (292019, 1)
     mu_i = np.sum(mu_X) * mu_Z # shape: (102,1)
@@ -46,10 +47,15 @@ def loglikelihood_Poisson(Y_g, Y_i, mu_X, mu_Z, I):
     # l = [Y_g]^T * log(mu_X) + [Y_i]^T * log(mu_Z) - sum(mu^Z)*sum(mu^X)
     sum_mu_X = np.sum(mu_X)
     sum_mu_Z = np.sum(mu_Z)
+    print(np.sum(Y_g * np.log(mu_X)))
+    print(np.sum(Y_i * np.log(mu_Z)))
+    print(sum_mu_X * sum_mu_Z)
+    print('======================')
     l = np.sum(Y_g * np.log(mu_X)) + np.sum(Y_i * np.log(mu_Z)) - sum_mu_X * sum_mu_Z
     # compute the penalized term
     # l* = l + 1/2 log(det(I(theta)))
     det_I = np.linalg.det(I)
+    #machine_epsilon = np.finfo(float).eps 
     log_det_I = np.log(det_I)
     l_fr = l + 1/2 * log_det_I
     return l, l_fr
@@ -57,17 +63,22 @@ def loglikelihood_Poisson(Y_g, Y_i, mu_X, mu_Z, I):
 # initialization 
 # mu_X only contains the effects of image-wise regressors 
 # mu_Z only contains the effects of study-level covariates 
-beta_0 = np.log(sum(Y_verbal) / 292019) # assume the occurance of foci is equal likely across whole brain
-beta = np.full(shape=(X.shape[1], 1), fill_value=beta_0) # shape: (311,1)
+x = np.loadtxt('minimizer_x.txt')
+P, R = X.shape[1], Z_verbal.shape[1]
+beta = x[:P].reshape((P,1))
+gamma = x[P:].reshape((R,1))
 mu_X = np.exp(X @ beta)
-gamma = np.array([0,0]).reshape((2,1)) # assume no study-wise regressor
 mu_Z = np.exp(Z_verbal @ gamma)
 
 I = Fisher_Information(mu_X, mu_Z, X, Z_verbal) # shape: (313, 313)
 
+
+N, P = X.shape # 228453, 358
+M, R = Z_verbal.shape # 102, 2
+
 # set up variables needed in iteration 
 diff = np.inf 
-l_fr_prev = -np.inf
+l_prev = -np.inf
 count = 0
 
 beta_2norm_list = [np.linalg.norm(beta)]
@@ -77,25 +88,44 @@ l_0, l_fr_0 = loglikelihood_Poisson(Y_verbal, Y_i_verbal, mu_X, mu_Z, I)
 l_list = [l_0]
 l_fr_list = [l_fr_0]
 print(l_0, l_fr_0)
+exit()
 
-while diff > 1: 
+while diff > 1e-4: 
     # voxelwise intensity summation (over all studies)
     mu_g = np.sum(mu_Z) * mu_X # shape: (292019, 1)
     # study-wise intensity summation (over all voxels)
     mu_i = np.sum(mu_X) * mu_Z # shape: (102,1)
-    # first order derivatives 
-    first_order_derivative_beta = X.transpose() @ (Y_verbal - mu_g) # shape: (311,1)
-    first_order_derivative_gamma = Z_verbal.transpose() @ (Y_i_verbal - mu_i) # shape: (2,1)
-    Jacobian = np.concatenate((first_order_derivative_beta, first_order_derivative_gamma), axis=0) # shape: (313, 1)
-    # second order derivatives 
-    Hessian = Fisher_Information(mu_X, mu_Z, X, Z_verbal)
-    cg_solution = cg(A=Hessian, b=Jacobian)[0] # shape: (313,)
-    update = cg_solution.reshape((313, 1))
-    beta_gamma = np.concatenate((beta, gamma), axis=0) # shape: (313, 1)
-    beta_gamma = beta_gamma - update
-    # split beta and gamma
-    beta = beta_gamma[:311, :] # first 311 elements 
-    gamma = beta_gamma[311:, :] # last 2 elements
+    # first order derivatives for beta (with Firth-penalized term)
+    mu_g_sqrt = np.sqrt(mu_g)
+    X_star = csr_matrix(X).multiply(mu_g_sqrt)# X* = W^(1/2) X; W=diag(mu_g)
+    XWX = X_star.T @ X_star # XWX = [W^(1/2) X]^T [W^(1/2) X]
+    XWX_inverse = inv(csc_matrix(XWX)) 
+    WX = X_sparse.multiply(mu_g) 
+    hadamard_product = (WX @ XWX_inverse).multiply(X) # diag(AB^T) = (A @ B) 1
+    h = np.sum(hadamard_product, axis=1) # h = (H_11,H_22,...,H_nn)^T, H = WX(X^T WX)^(-1) X^T
+    first_order_derivative_beta = X.transpose() @ (Y_verbal + 1/2*h - mu_g) # shape: (311,1)
+    first_order_derivative_beta = np.asarray(first_order_derivative_beta)
+    # first order derivatives for gamma (with Firth-penalized term)
+    mu_i_sqrt = np.sqrt(mu_i)
+    Z_star = csr_matrix(Z_verbal).multiply(mu_i_sqrt) # Z* = V^(1/2) Z; V=diag(mu_i)
+    ZVZ = Z_star.T @ Z_star # ZVZ = [V^(1/2) Z]^T [V^(1/2) Z]
+    ZVZ_inverse = np.linalg.inv(ZVZ.toarray())
+    V = np.diag(mu_i.reshape((M,))) 
+    H_2 = V @ Z_verbal @ ZVZ_inverse @ Z_verbal.T
+    h_2 = np.diag(H_2) # extract diagonal elements 
+    h_2 = h_2.reshape((M,1))
+    first_order_derivative_gamma = Z_verbal.transpose() @ (Y_i_verbal + 1/2*h_2 - mu_i) # shape: (2,1)
+    # second order derivatives for beta (with Firth-penalized term)
+    second_order_derivarive_beta = - XWX 
+    cg_solution_beta = cg(A=second_order_derivarive_beta, b=first_order_derivative_beta)[0] # shape: (311,)
+    update_beta = cg_solution_beta.reshape((P, 1))
+    beta = beta - update_beta
+    # second order derivatives for gamma (with Firth-penalized term)
+    second_order_derivarive_gamma = - ZVZ
+    cg_solution_gamma = cg(A=second_order_derivarive_gamma, b=first_order_derivative_gamma)[0] # shape: (2,)
+    update_gamma = cg_solution_gamma.reshape((R, 1))
+    gamma = gamma - update_gamma
+    # compute the 2 norm of the update in each iteration 
     beta_2norm = np.linalg.norm(beta)
     beta_2norm_list.append(beta_2norm)
     gamma_2norm = np.linalg.norm(gamma)
@@ -108,11 +138,11 @@ while diff > 1:
     l, l_fr = loglikelihood_Poisson(Y_verbal, Y_i_verbal, mu_X, mu_Z, I)
     l_list.append(l)
     l_fr_list.append(l_fr)
-    diff = l_fr - l_fr_prev
+    diff = l - l_prev
     print('Firth penalized log-likelihood in the current iteration is', l_fr)
     print('difference of log-likelihood is', diff)
     count += 1
-    l_fr_prev = l_fr
+    l_prev = l
     print(count)
     print('------------------------')
 

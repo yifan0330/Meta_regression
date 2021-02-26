@@ -6,9 +6,10 @@ import matplotlib.pyplot as plt
 from scipy.sparse import csr_matrix, save_npz
 
 # load the brain mask
-mask_dil = nib.load("MNI152_T1_2mm_brain_mask_dil.nii")
-mask = np.array(mask_dil.dataobj) # unique values: 0/1
-n_brain_voxel = np.sum(mask) # 292019/194369 within-brain voxels
+mask_MNI152 = nib.load("MNI152_T1_2mm_brain.nii")
+mask = np.array(mask_MNI152.dataobj) # unique values: 0/1
+mask[mask > 0] = 1
+n_brain_voxel = np.sum(mask) # 292019/228453 within-brain voxels
 dim_mask = np.shape(mask) # [91,109,91]
 
 # load stimulus type 
@@ -102,7 +103,7 @@ np.savetxt('preprocessed_data/Y_i_nonverbal.txt', Y_i_nonverbal, fmt='%i')
 
 # create B-spline basis for x/y/z coordinate
 x_deg = 3
-x_knots = np.arange(min(xx), max(xx), step=15) # 7, 22, 37, 52, 67 / 11, 26, 41, 56, 71
+x_knots = np.arange(min(xx), max(xx), step=14) # 9 23 37 51 65 79
 x_design_matrix = patsy.dmatrix("bs(x, knots=x_knots, degree=3,include_intercept=False)", data={"x":xx},return_type='matrix')
 x_design_array = np.array(x_design_matrix) 
 x_spline = x_design_array[:,1:] # remove the first column (every element is 1); shape: (76, 8) / (69, 8)
@@ -112,7 +113,7 @@ x_rowsum = np.sum(x_spline, axis=1)
 x_colmean = np.mean(x_spline, axis=0)
 
 y_deg = 3
-y_knots = np.arange(min(yy), max(yy), step=15) # 8, 23, 38, 53, 68, 83, 98 / 11, 25, 39, 53, 67, 81, 95
+y_knots = np.arange(min(yy), max(yy), step=14) # 10 24 38 52 66 80 94
 y_design_matrix = patsy.dmatrix("bs(y, knots=y_knots, degree=3,include_intercept=False)", data={"y":yy},return_type='matrix')
 y_design_array = np.array(y_design_matrix) 
 y_spline = y_design_array[:,1:] # shape: (94, 10) / (88, 10)
@@ -120,7 +121,7 @@ y_rowsum = np.sum(y_spline, axis=1)
 y_colmean = np.mean(y_spline, axis=0)
 
 z_deg = 3
-z_knots = np.arange(min(zz), max(zz), step=15) # 3, 18, 33, 48, 63 / 0 15 30 45 60
+z_knots = np.arange(min(zz), max(zz), step=14) # 1 15 29 43 57 71
 z_design_matrix = patsy.dmatrix("bs(z, knots=z_knots, degree=3,include_intercept=False)", data={"z":zz},return_type='matrix')
 z_design_array = np.array(z_design_matrix) 
 z_spline = z_design_array[:,1:] # shape: (76, 8) / (76, 8)
@@ -128,9 +129,9 @@ z_rowsum = np.sum(z_spline, axis=1)
 z_colmean = np.mean(z_spline, axis=0)
 
 
-image_dim = np.array([x_spline.shape[0], y_spline.shape[0], z_spline.shape[0]]) #[76 94 76] / [69 88 76]
+image_dim = np.array([x_spline.shape[0], y_spline.shape[0], z_spline.shape[0]]) #[76 94 76] / [72 90 76]
 x_df, y_df, z_df = x_spline.shape[1], y_spline.shape[1], z_spline.shape[1] 
-image_df = np.array([x_df, y_df, z_df]) # 8, 10, 8 
+image_df = np.array([x_df, y_df, z_df]) # 8, 10, 8 / 9, 10, 9
 
 # convert spline bases in 3 dimesion to data matrix by tensor product
 X = np.empty(shape=[np.prod(image_dim), np.prod(image_df)]) #shape: (542944, 640) / (461472, 640)
@@ -207,11 +208,11 @@ for bx in range(x_df):
         for bz in range(z_df):
             basis_index = bz + z_df*by + z_df*y_df*bx
             basis_coef = X[:, basis_index]
-            if np.max(basis_coef) < 0.1:
+            if np.sum(basis_coef) < 96: # 5% of the voxel with largest coefficient summation/maximum 
                 no_suppport_basis = np.append(no_suppport_basis, basis_index)
-no_suppport_basis = no_suppport_basis.astype(int)
+no_suppport_basis = no_suppport_basis.astype(int) # 385
 # 197/275/329 tensor product of spline basis have no support in brain mask (computationally)
-X = np.delete(X, obj=no_suppport_basis, axis=1) # shape: (292019, 443/365/311) / (194369, 562)
+X = np.delete(X, obj=no_suppport_basis, axis=1) # shape: (292019, 260) / (228453, 425)
 # convert to compressed sparse row matrix
 save_npz("preprocessed_data/X.npz", csr_matrix(X))
 
