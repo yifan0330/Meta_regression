@@ -85,6 +85,7 @@ foci = foci.reset_index(drop=True)
 foci_verbal = foci_verbal.reset_index(drop=True)
 foci_non_verbal = foci_non_verbal.reset_index(drop=True)
 
+
 # count the total number of foci in study i regardless of foci location in verbal/non-verbal group
 contrast_verbal = foci_verbal['contrast'].tolist() # list contrast index of verbal stimuli 
 Y_i_verbal = list()
@@ -208,18 +209,19 @@ for bx in range(x_df):
         for bz in range(z_df):
             basis_index = bz + z_df*by + z_df*y_df*bx
             basis_coef = X[:, basis_index]
-            if np.sum(basis_coef) < 96: # 5% of the voxel with largest coefficient summation/maximum 
+            if np.sum(basis_coef) < 192: # 5% of the voxel with largest coefficient summation/maximum 
                 no_suppport_basis = np.append(no_suppport_basis, basis_index)
 no_suppport_basis = no_suppport_basis.astype(int) # 385
 # 197/275/329 tensor product of spline basis have no support in brain mask (computationally)
 X = np.delete(X, obj=no_suppport_basis, axis=1) # shape: (292019, 260) / (228453, 425)
+
 # convert to compressed sparse row matrix
 save_npz("preprocessed_data/X.npz", csr_matrix(X))
 
 # load the data of participate age and sample size 
 info = open('info.txt', 'r')
 info_lines = info.readlines()
-sample_size_col_num = 1
+sample_size_col_num =   1
 age_col_num = 2
 verbal_col_num = 6
 sample_size_list_verbal,sample_size_list_nonverbal = list(), list()

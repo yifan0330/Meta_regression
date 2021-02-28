@@ -46,28 +46,28 @@ def log_likelihood_beta(beta, gamma, X, Z):
     l_fr = l + 1/2 * log_det_I_beta
     return l_fr
 
-def log_likelihood_gamma(beta, gamma, X, Z):
-    P, R = X.shape[1], Z.shape[1]
-    mu_X = np.exp(X @ beta)
-    mu_Z = np.exp(Z @ gamma)
+#def log_likelihood_gamma(beta, gamma, X, Z):
+    #P, R = X.shape[1], Z.shape[1]
+    #mu_X = np.exp(X @ beta)
+    #mu_Z = np.exp(Z @ gamma)
     # compute log-likelihood
     # l = [Y_g]^T * log(mu_X) + [Y_i]^T * log(mu_Z) - sum(mu^Z)*sum(mu^X)
-    sum_mu_X = np.sum(mu_X)
-    sum_mu_Z = np.sum(mu_Z)
-    l = np.sum(Y_verbal * np.log(mu_X)) + np.sum(Y_i_verbal * np.log(mu_Z)) - sum_mu_X * sum_mu_Z
+    #sum_mu_X = np.sum(mu_X)
+    #sum_mu_Z = np.sum(mu_Z)
+    #l = np.sum(Y_verbal * np.log(mu_X)) + np.sum(Y_i_verbal * np.log(mu_Z)) - sum_mu_X * sum_mu_Z
     # compute the penalized term
     # l* = l + 1/2 log(det(I(theta)))
-    mu_g = np.sum(mu_Z) * mu_X # shape: (292019, 1)
-    mu_i = np.sum(mu_X) * mu_Z # shape: (102,1)
-    mu_i_sqrt = np.sqrt(mu_i)
-    Z_star = csr_matrix(Z_verbal).multiply(mu_i_sqrt) # Z* = V^(1/2) Z; V=diag(mu_i)
-    ZVZ = Z_star.T @ Z_star # ZVZ = [V^(1/2) Z]^T [V^(1/2) Z]
-    I_gamma = ZVZ.toarray() # shape: (2,2)
-    det_I_gamma = np.linalg.det(I_gamma)
-    log_det_I_gamma = np.log(det_I_gamma)
-    l_fr = l + 1/2 * log_det_I_gamma
+    #mu_g = np.sum(mu_Z) * mu_X # shape: (292019, 1)
+    #mu_i = np.sum(mu_X) * mu_Z # shape: (102,1)
+    #mu_i_sqrt = np.sqrt(mu_i)
+    #Z_star = csr_matrix(Z_verbal).multiply(mu_i_sqrt) # Z* = V^(1/2) Z; V=diag(mu_i)
+    #ZVZ = Z_star.T @ Z_star # ZVZ = [V^(1/2) Z]^T [V^(1/2) Z]
+    #I_gamma = ZVZ.toarray() # shape: (2,2)
+    #det_I_gamma = np.linalg.det(I_gamma)
+    #log_det_I_gamma = np.log(det_I_gamma)
+    #l_fr = l + 1/2 * log_det_I_gamma
     #print(l_fr)
-    return l_fr
+    #return l_fr
 
 
 # initialization for beta and gamma => mu_X and mu_Z
@@ -76,23 +76,23 @@ beta = np.full(shape=(X.shape[1], 1), fill_value=beta_i) # shape: (425,1)
 gamma = np.array([0, 0]).reshape((Z_verbal.shape[1], 1)) # assume no study-wise regressor
 
 l_fr_beta_0 = log_likelihood_beta(beta, gamma, X, Z_verbal)
-l_fr_gamma_0 = log_likelihood_gamma(beta, gamma, X, Z_verbal)
+#l_fr_gamma_0 = log_likelihood_gamma(beta, gamma, X, Z_verbal)
 
 diff = np.inf # initializations for the loop
 l_fr_beta_prev = -np.inf
-l_fr_gamma_prev = -np.inf
+#l_fr_gamma_prev = -np.inf
 
 beta_2norm_list = list()
 gamma_2norm_list = list()
 
 count = 1
 l_fr_beta_list = [l_fr_beta_0]
-l_fr_gamma_list = [l_fr_gamma_0]
+#l_fr_gamma_list = [l_fr_gamma_0]
 print(l_fr_beta_list)
-print(l_fr_gamma_list)
+#print(l_fr_gamma_list)
 
 # start with update beta
-while diff > 3:
+while True: #diff > 500:
     # compute first order derivative w.r.t beta
     mu_X = np.exp(X @ beta)
     mu_Z = np.exp(Z_verbal @ gamma)
@@ -126,12 +126,12 @@ while diff > 3:
     mu_i_sqrt = np.sqrt(mu_i)
     Z_star = csr_matrix(Z_verbal).multiply(mu_i_sqrt) # Z* = V^(1/2) Z; V=diag(mu_i)
     ZVZ = Z_star.T @ Z_star # ZVZ = [V^(1/2) Z]^T [V^(1/2) Z]
-    ZVZ_inverse = np.linalg.inv(ZVZ.toarray())
-    V = np.diag(mu_i.reshape((M,))) 
-    H_2 = V @ Z_verbal @ ZVZ_inverse @ Z_verbal.T
-    h_2 = np.diag(H_2) # extract diagonal elements 
-    h_2 = h_2.reshape((M,1))
-    Jacobian_gamma = Z_verbal.transpose() @ (Y_i_verbal + 1/2*h_2 - mu_i) # shape: (2,1)
+    #ZVZ_inverse = np.linalg.inv(ZVZ.toarray())
+    #V = np.diag(mu_i.reshape((M,))) 
+    #H_2 = V @ Z_verbal @ ZVZ_inverse @ Z_verbal.T
+    #h_2 = np.diag(H_2) # extract diagonal elements 
+    #h_2 = h_2.reshape((M,1))
+    Jacobian_gamma = Z_verbal.transpose() @ (Y_i_verbal - mu_i) # shape: (2,1)
     Hessian_gamma = -ZVZ.toarray() # shape: (2,2)
     cg_solution_gamma = cg(Hessian_gamma, b=Jacobian_gamma)[0] # shape: (358,)
     gamma_update = cg_solution_gamma.reshape((Z_verbal.shape[1],1))
@@ -140,14 +140,15 @@ while diff > 3:
     gamma_2norm = np.linalg.norm(gamma)
     gamma_2norm_list.append(gamma_2norm)
     print('2 norm of gamma is', gamma_2norm)
-    l_fr_gamma = log_likelihood_gamma(beta, gamma, X, Z_verbal)
-    l_fr_gamma_list.append(l_fr_gamma)
+    l_fr_gamma = log_likelihood_beta(beta, gamma, X, Z_verbal)
+    #l_fr_gamma_list.append(l_fr_gamma)
     print('log-likelihood (gamma) is ', l_fr_gamma)
-    diff = max(l_fr_beta - l_fr_beta_prev, l_fr_gamma - l_fr_gamma_prev)
-    print('difference is ', diff, l_fr_beta - l_fr_beta_prev, l_fr_gamma - l_fr_gamma_prev)
+    diff = l_fr_beta - l_fr_beta_prev
+    print('the difference is', diff)
+    #print('difference is ', diff, l_fr_beta - l_fr_beta_prev, l_fr_gamma - l_fr_gamma_prev)
     count = count + 1
     l_fr_beta_prev = l_fr_beta
-    l_fr_gamma_prev = l_fr_gamma
+    #l_fr_gamma_prev = l_fr_gamma
     print('-------------------this iteration is finished --------------------')
 
 np.savetxt('beta_Poisson_separate.txt', beta)
